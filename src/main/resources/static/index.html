@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>Tic-Tac-Toe Infinite Light</title>
+    <style>
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #ffffff; }
+        #ui { position: absolute; top: 15px; left: 15px; z-index: 10; pointer-events: none; width: 100%; }
+        #menu-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(221, 160, 221,0.45); display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .window { background: white; padding: 40px; border-radius: 12px; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.15); border: 2px solid #9370DB; }
+        canvas { display: block; cursor: crosshair; background: #fff; }
+        .stats { background: rgba(255,255,255,0.7); color: #9370DB; padding: 15px; border-radius: 8px; font-size: 18px; border: 2px solid #9370DB; display: inline-block; pointer-events: auto; }
+        button { padding: 12px 25px; background: #9370DB; color: white; border: none; border-radius: 15px; cursor: pointer; font-weight: bold; }
+        select { padding: 8px; margin: 5px; border-radius: 4px; border: 2px solid #9370DB; }
+        text { style: color: #9370DB }
+    </style>
+</head>
+<body>
+
+<div id="menu-overlay">
+    <div class="window">
+        <h1 style="color: #9370DB">Tic-Tac-Toe</h1>
+        <p>Mode: <select id="mode"><option value="FIRST_LINE">Until first line</option><option value="TIME_ATTACK">Using points (60s)</option></select></p>
+        <p>Opponent: <select id="opponent"><option value="true">AI</option><option value="false">Human</option></select></p>
+        <p>You play as: <select id="playerSide"><option value="1">Crosses (X)</option><option value="2">Zeros (O)</option></select></p>
+        <button onclick="startGame()">Start</button>
+    </div>
+</div>
+
+<div id="ui">
+    <div class="stats">
+        <b id="status">Loading...</b> | <span id="scores">X: 0 | O: 0</span><br>
+        <small style="color: #9370DB">LMC: turn | RMC: Movement | wheel: scale</small>
+    </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    let board = {};
+    let cellSize = 35;
+    let offsetX = window.innerWidth / 2;
+    let offsetY = window.innerHeight / 2;
+    let isDragging = false;
+    let lastMousePos = { x: 0, y: 0 };
+    let gameActive = false;
+
+    window.onresize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; draw(); };
+    window.onresize();
+
+    // Масштабування (Zoom)
+    window.onwheel = (e) => {
+        const delta = e.deltaY > 0 ? -2 : 2;
+        if (cellSize + delta > 15 && cellSize + delta < 100) {
+            cellSize += delta;
+            draw();
+        }
+    };
+
+    async function startGame() {
+        const mode = document.getElementById('mode').value;
+        const vsAi = document.getElementById('opponent').value;
+        const side = document.getElementById('playerSide').value;
+
+        const res = await fetch(`/api/start?mode=${mode}&vsAi=${vsAi}&aiSide=${side == 1 ? 2 : 1}`, {method: 'POST'});
+        const data = await res.json();
+
+        board = data.board;
+        gameActive = true;
+        document.getElementById('menu-overlay').style.display = 'none';
+        updateStatus(data);
+        draw();
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Малюємо світлу сітку (як у Swing)
+        ctx.strokeStyle = "#e0e0e0";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let x = offsetX % cellSize; x < canvas.width; x += cellSize) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
+        for (let y = offsetY % cellSize; y < canvas.height; y += cellSize) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
+        ctx.stroke();
+
+        // Малюємо фігури
+        for (const key in board) {
+            const match = key.match(/x=(-?\d+), y=(-?\d+)/);
+            if (match) {
+                drawSign(parseInt(match[1]), parseInt(match[2]), board[key]);
+            }
+        }
+    }
+
+    function drawSign(bx, by, val) {
+        const x = bx * cellSize + offsetX;
+        const y = by * cellSize + offsetY;
+        const pad = cellSize * 0.2;
+
+        ctx.lineWidth = Math.max(2, cellSize / 12);
+        ctx.lineCap = "round";
+
+        if (val === 1) { // Червоний X
+            ctx.strokeStyle = "#e74c3c";
+            ctx.beginPath();
+            ctx.moveTo(x + pad, y + pad); ctx.lineTo(x + cellSize - pad, y + cellSize - pad);
+            ctx.moveTo(x + cellSize - pad, y + pad); ctx.lineTo(x + pad, y + cellSize - pad);
+            ctx.stroke();
+        } else { // Синій O
+            ctx.strokeStyle = "#3498db";
+            ctx.beginPath();
+            ctx.arc(x + cellSize/2, y + cellSize/2, cellSize/2 - pad, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+
+    canvas.onmousedown = (e) => {
+        if (e.button === 2) { isDragging = true; lastMousePos = { x: e.clientX, y: e.clientY }; }
+        if (e.button === 0 && gameActive) {
+            const bx = Math.floor((e.clientX - offsetX) / cellSize);
+            const by = Math.floor((e.clientY - offsetY) / cellSize);
+            makeMove(bx, by);
+        }
+    };
+
+    window.onmousemove = (e) => {
+        if (isDragging) {
+            offsetX += e.clientX - lastMousePos.x;
+            offsetY += e.clientY - lastMousePos.y;
+            lastMousePos = { x: e.clientX, y: e.clientY };
+            draw();
+        }
+    };
+
+    window.onmouseup = () => isDragging = false;
+    canvas.oncontextmenu = (e) => e.preventDefault();
+
+    async function makeMove(x, y) {
+        const res = await fetch(`/api/move?x=${x}&y=${y}`, {method: 'POST'});
+        const data = await res.json();
+        board = data.board;
+        updateStatus(data);
+        draw();
+
+        if (data.gameOver) {
+            setTimeout(() => { alert(data.status); location.reload(); }, 100);
+        }
+    }
+
+    function updateStatus(data) {
+        document.getElementById('status').innerText = data.status;
+        document.getElementById('scores').innerText = `X: ${data.scoreX} | O: ${data.scoreO}`;
+    }
+</script>
+</body>
+</html>
